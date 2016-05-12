@@ -124,13 +124,58 @@ case 'save':
 				$tree->setUserPreference($user, 'canedit', Filter::post('canedit' . $tree->getTreeId(), implode('|', array_keys($ALL_EDIT_OPTIONS))));
 				if (Filter::post('gedcomid' . $tree->getTreeId(), WT_REGEX_XREF)) {
 					$tree->setUserPreference($user, 'RELATIONSHIP_PATH_LENGTH', Filter::postInteger('RELATIONSHIP_PATH_LENGTH' . $tree->getTreeId(), 0, 10, 0));
-					$tree->setUserPreference($user, 'RELATIONSHIP_ANCESTORS_DEPTH', Filter::postInteger('RELATIONSHIP_ANCESTORS_DEPTH' . $tree->getTreeId(), -1, 10, 0));
-					$tree->setUserPreference($user, 'RELATIONSHIP_DESCENDANTS_DEPTH', Filter::postInteger('RELATIONSHIP_DESCENDANTS_DEPTH' . $tree->getTreeId(), -1, 10, 0));
 				} else {
 					// Do not allow a path length to be set if the individual ID is not
 					$tree->setUserPreference($user, 'RELATIONSHIP_PATH_LENGTH', null);
-					$tree->setUserPreference($user, 'RELATIONSHIP_ANCESTORS_DEPTH', null);
-					$tree->setUserPreference($user, 'RELATIONSHIP_DESCENDANTS_DEPTH', null);
+				}
+				$rules = $_POST['rule'][$tree->getTreeId()];
+				$newrules = array();
+				if (is_array($rules)) {
+					// TODO: Use Filter class?
+					foreach ($rules as $rulenr => $rule) {
+						$newrule = array();
+						$newrule['gedcomid'] = filter_var(
+							$rule['gedcomid'],
+							FILTER_VALIDATE_REGEXP,
+							array(
+								'options' => array(
+									'regexp'  => '/^(' . WT_REGEX_XREF . ')$/u',
+								),
+							)
+						);
+						$newrule['role'] = filter_var(
+							$rule['role'],
+							FILTER_VALIDATE_REGEXP,
+							array(
+								'options' => array(
+									'regexp'  => '/^(access|edit)$/u',
+								),
+							)
+						);
+						foreach (array('ancestors', 'descendants', 'relpath') as $key) {
+							$newrule[$key] = filter_var(
+								$rule[$key],
+								FILTER_VALIDATE_INT,
+								array(
+									'options' => array(
+										'default' => 0,
+										'min_range' => -1,
+										'max_range' => 10,
+									),
+								)
+							);
+						}
+						if (false
+							|| isset($rule['delete']) && (filter_var($rule['delete'], FILTER_SANITIZE_STRING)) === "delete"
+							|| empty($newrule['gedcomid'])
+							|| empty($newrule['role'])
+						) {
+							// Delete/ignore rule...
+							continue;
+						}
+						$newrules[] = $newrule;
+					}
+					$tree->setUserPreference($user, 'ACCESS_RULES', json_encode($newrules));
 				}
 			}
 		}
@@ -577,9 +622,6 @@ case 'edit':
 			<thead>
 				<tr>
 					<th>
-						<?php echo I18N::translate('Family tree'); ?>
-					</th>
-					<th>
 						<?php echo I18N::translate('Role'); ?>
 					</th>
 					<th>
@@ -593,8 +635,6 @@ case 'edit':
 					</th>
 				</tr>
 				<tr>
-					<td>
-					</td>
 					<td>
 					</td>
 					<td>
@@ -619,10 +659,13 @@ case 'edit':
 			<tbody>
 				<?php foreach (Tree::getAll() as $tree): ?>
 				<tr>
+					<th colspan="4">
+						<?php echo I18N::translate('Family tree') . ": " . $tree->getTitleHtml(); ?>
+					</th>
+				</tr>
+				<tr>
 					<td>
-						<?php echo $tree->getTitleHtml(); ?>
-					</td>
-					<td>
+						<!-- Role -->
 						<select name="canedit<?php echo $tree->getTreeId(); ?>">
 							<?php foreach ($ALL_EDIT_OPTIONS as $EDIT_OPTION => $desc): ?>
 								<option value="<?php echo $EDIT_OPTION; ?>"
@@ -634,6 +677,7 @@ case 'edit':
 						</select>
 					</td>
 					<td>
+						<!-- Default individual -->
 						<input
 							data-autocomplete-type="INDI"
 							data-autocomplete-ged="<?php echo Filter::escapeHtml($tree->getName()); ?>"
@@ -646,6 +690,7 @@ case 'edit':
 						<?php echo FunctionsPrint::printFindIndividualLink('rootid' . $tree->getTreeId(), '', $tree); ?>
 					</td>
 					<td>
+						<!-- Individual record -->
 						<input
 							data-autocomplete-type="INDI"
 							data-autocomplete-ged="<?php echo Filter::escapeHtml($tree->getName()); ?>"
@@ -658,42 +703,104 @@ case 'edit':
 						<?php echo FunctionsPrint::printFindIndividualLink('gedcomid' . $tree->getTreeId(), '', $tree); ?>
 					</td>
 					<td>
+					</td>
+				</tr>
+				<tr>
+					<td>
+					</td>
+					<td>
+					</td>
+					<td>
+					</td>
+					<td>
 						<table>
 							<thead>
 								<tr>
-									<td><?php echo I18N::translate('Relationship'); ?>&nbsp;</td>
+									<td><?php echo I18N::translate('Role'); ?>&nbsp;</td>
+									<td><?php echo I18N::translate('Individual record'); ?>&nbsp;</td>
 									<td><?php echo I18N::translate('Ancestors'); ?>&nbsp;</td>
 									<td><?php echo I18N::translate('Descendants'); ?>&nbsp;</td>
+									<td><?php echo I18N::translate('Relationship'); ?>&nbsp;</td>
+									<td>
+										<button class="btn btn-primary btn-add-access-rule" id="add-rule-<?php echo $tree->getTreeId(); ?>" type="button">
+											<i class="fa fa-plus"></i>
+											<?php echo I18N::translate('Add'); ?>
+										</button>
+									</td>
 								</tr>
 							</thead>
 							<tbody>
+								<?php
+								$rules = json_decode($tree->getUserPreference($user, 'ACCESS_RULES'), true);
+								$rules[] = array('role'=>'', 'gedcomid'=>'', 'ancestors'=>0, 'descendants'=>0, 'relpath'=>0);
+								foreach ($rules as $rulenr => $rule):
+								?>
+									<tr>
+										<td>
+											<!-- Role -->
+											<select name="<?php echo sprintf('rule[%d][%d][%s]', $tree->getTreeId(), $rulenr, 'role'); ?>">
+												<option></option>
+												<?php foreach ($ALL_EDIT_OPTIONS as $EDIT_OPTION => $desc): ?>
+													<?php
+													// We don't need 'none', since we only raise privileges with access rules,
+													// but we can't have 'accept' or 'admin'
+													if (!in_array($EDIT_OPTION, array('access', 'edit'))) continue;
+													?>
+													<option value="<?php echo $EDIT_OPTION; ?>"
+														<?php echo $EDIT_OPTION === $rule['role'] ? 'selected' : ''; ?>
+														>
+														<?php echo $desc; ?>
+													</option>
+												<?php endforeach; ?>
+											</select>
+										</td>
+										<td>
+											<!-- Individual record -->
+											<input
+												data-autocomplete-type="INDI"
+												data-autocomplete-ged="<?php echo Filter::escapeHtml($tree->getName()); ?>"
+												type="text"
+												size="12"
+												name="<?php printf('rule[%d][%d][%s]', $tree->getTreeId(), $rulenr, 'gedcomid'); ?>"
+												id="<?php echo $id = sprintf('rule_%d_%d_%s', $tree->getTreeId(), $rulenr, 'gedcomid'); ?>"
+												value="<?php echo Filter::escapeHtml($rule['gedcomid']); ?>"
+											>
+											<?php echo FunctionsPrint::printFindIndividualLink($id, '', $tree); ?>
+										</td>
+										<td>
+											<select name="<?php echo sprintf('rule[%d][%d][%s]', $tree->getTreeId(), $rulenr, 'ancestors'); ?>" id="<?php echo $id = sprintf('rule_%d_%d_%s', $tree->getTreeId(), $rulenr, 'ancestors'); ?>" class="relpath">
+												<?php for ($n = -1; $n <= 10; ++$n): ?>
+												<option value="<?php echo $n; ?>" <?php echo $rule['ancestors'] == $n ? 'selected' : ''; ?>>
+													<?php echo ($n === -1 ? I18N::translate('All') : ($n ? $n : I18N::translate('None'))); ?>
+												</option>
+												<?php endfor; ?>
+											</select>&nbsp;
+										</td>
+										<td>
+											<select name="<?php echo sprintf('rule[%d][%d][%s]', $tree->getTreeId(), $rulenr, 'descendants'); ?>" id="<?php echo sprintf('rule_%d_%d_%s', $tree->getTreeId(), $rulenr, 'descendants'); ?>" class="relpath">
+												<?php for ($n = -1; $n <= 10; ++$n): ?>
+												<option value="<?php echo $n; ?>" <?php echo $rule['descendants'] == $n ? 'selected' : ''; ?>>
+													<?php echo ($n === -1 ? I18N::translate('All') : ($n ? $n : I18N::translate('None'))); ?>
+												</option>
+												<?php endfor; ?>
+											</select>
+										</td>
+										<td>
+											<select name="<?php echo sprintf('rule[%d][%d][%s]', $tree->getTreeId(), $rulenr, 'relpath'); ?>" id="<?php echo sprintf('rule_%d_%d_%s', $tree->getTreeId(), $rulenr, 'relpath'); ?>" class="relpath">
+												<?php for ($n = -1; $n <= 10; ++$n): ?>
+												<option value="<?php echo $n; ?>" <?php echo $rule['relpath'] == $n ? 'selected' : ''; ?>>
+													<?php echo ($n === -1 ? I18N::translate('All') : ($n ? $n : I18N::translate('None'))); ?>
+												</option>
+												<?php endfor; ?>
+											</select>&nbsp;
+										</td>
+										<td>
+											<?php echo I18N::translate('delete'); ?> <input type='checkbox' name="<?php echo sprintf('rule[%d][%d][%s]', $tree->getTreeId(), $rulenr, 'delete'); ?>" value='delete'>
+										</td>
+									</tr>
+								<?php endforeach; ?>
 								<tr>
-									<td>
-										<select name="RELATIONSHIP_PATH_LENGTH<?php echo $tree->getTreeId(); ?>" id="RELATIONSHIP_PATH_LENGTH<?php echo $tree->getTreeId(); ?>" class="relpath">
-											<?php for ($n = -1; $n <= 10; ++$n): ?>
-											<option value="<?php echo $n; ?>" <?php echo $tree->getUserPreference($user, 'RELATIONSHIP_PATH_LENGTH') == $n ? 'selected' : ''; ?>>
-												<?php echo ($n === -1 ? I18N::translate('None') : ($n ? $n : I18N::translate('All'))); ?>
-											</option>
-											<?php endfor; ?>
-										</select>&nbsp;
-									</td>
-									<td>
-										<select name="RELATIONSHIP_ANCESTORS_DEPTH<?php echo $tree->getTreeId(); ?>" id="RELATIONSHIP_ANCESTORS_DEPTH<?php echo $tree->getTreeId(); ?>" class="relpath">
-											<?php for ($n = -1; $n <= 10; ++$n): ?>
-											<option value="<?php echo $n; ?>" <?php echo $tree->getUserPreference($user, 'RELATIONSHIP_ANCESTORS_DEPTH') == $n ? 'selected' : ''; ?>>
-												<?php echo ($n === -1 ? I18N::translate('All') : ($n ? $n : I18N::translate('None'))); ?>
-											</option>
-											<?php endfor; ?>
-										</select>&nbsp;
-									</td>
-									<td>
-										<select name="RELATIONSHIP_DESCENDANTS_DEPTH<?php echo $tree->getTreeId(); ?>" id="RELATIONSHIP_DESCENDANTS_DEPTH<?php echo $tree->getTreeId(); ?>" class="relpath">
-											<?php for ($n = -1; $n <= 10; ++$n): ?>
-											<option value="<?php echo $n; ?>" <?php echo $tree->getUserPreference($user, 'RELATIONSHIP_DESCENDANTS_DEPTH') == $n ? 'selected' : ''; ?>>
-												<?php echo ($n === -1 ? I18N::translate('All') : ($n ? $n : I18N::translate('None'))); ?>
-											</option>
-											<?php endfor; ?>
-										</select>
+									<td colspan='5'>
 									</td>
 								</tr>
 							</tbody>
