@@ -175,7 +175,11 @@ case 'save':
 						}
 						$newrules[] = $newrule;
 					}
-					$tree->setUserPreference($user, 'ACCESS_RULES', json_encode($newrules));
+					$json_rules = json_encode($newrules);
+					// Refuse to save access rules longer than 255 bytes as long as we use the settings table
+					if (strlen($json_rules) <= 255) {
+						$tree->setUserPreference($user, 'ACCESS_RULES', $json_rules);
+					}
 				}
 			}
 		}
@@ -731,8 +735,11 @@ case 'edit':
 							</thead>
 							<tbody>
 								<?php
-								$rules = json_decode($tree->getUserPreference($user, 'ACCESS_RULES'), true);
-								$rules[] = array('role'=>'', 'gedcomid'=>'', 'ancestors'=>0, 'descendants'=>0, 'relpath'=>0);
+								$json_rules = $tree->getUserPreference($user, 'ACCESS_RULES');
+								$rules = json_decode($json_rules, true);
+								if (count($rules) == 0 || strlen($json_rules) / count($rules) * (count($rules) + 1) < 255) {
+									$rules[] = array('role'=>'', 'gedcomid'=>'', 'ancestors'=>0, 'descendants'=>0, 'relpath'=>0);
+								}
 								foreach ($rules as $rulenr => $rule):
 								?>
 									<tr>
