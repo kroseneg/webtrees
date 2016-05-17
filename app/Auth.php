@@ -89,12 +89,14 @@ class Auth {
 	 *
 	 * @return bool
 	 */
-	public static function isEditor(Tree $tree, User $user = null) {
+	public static function isEditor(Tree $tree, User $user = null, Individual $individual = null) {
 		if ($user === null) {
 			$user = self::user();
 		}
 
-		return self::isModerator($tree, $user) || $user && $tree->getUserPreference($user, 'canedit') === 'edit';
+		return self::isModerator($tree, $user) || $user && $tree->getUserPreference($user, 'canedit') === 'edit'
+			|| (!empty($individual) && self::checkAccessRules("edit", $tree, $individual, $user))
+		;
 	}
 
 	/**
@@ -105,13 +107,56 @@ class Auth {
 	 *
 	 * @return bool
 	 */
-	public static function isMember(Tree $tree, User $user = null) {
+	public static function isMember(Tree $tree, User $user = null, Individual $individual = null) {
 		if ($user === null) {
 			$user = self::user();
 		}
 
-		return self::isEditor($tree, $user) || $user && $tree->getUserPreference($user, 'canedit') === 'access';
+		return self::isEditor($tree, $user) || $user && $tree->getUserPreference($user, 'canedit') === 'access'
+			|| (!empty($individual) && self::checkAccessRules("access", $tree, $individual, $user))
+		;
 	}
+
+	public static function checkAccessRules($minAccess, Tree $tree, Individual $target, User $user = null) {
+		if ($user === null) {
+			$user = self::user();
+		}
+
+		$access = false
+			|| $minAccess == "access" && self::isMember($tree, $user)
+			|| $minAccess == "edit"   && self::isEditor($tree, $user)
+#			|| $minAccess == "accept" && self::isModerator($tree, $user)
+			;
+
+		if ($access) return true;
+
+		$rules = json_decode($tree->getUserPreference($user, 'ACCESS_RULES'), true);
+
+		if (!is_array($rules)) return false;
+
+		$all_roles = array('none', 'access', 'edit', 'accept', 'admin');
+
+
+		foreach ($rules as $rule) {
+			if (array_search($rule['role'], $all_roles) < array_search($minAccess, $all_roles)) {
+				continue;
+			}
+
+			$individual = Individual::getInstance($rule['gedcomid'], $tree);
+
+			$access |= false
+				|| $individual == $target
+				|| Individual::isAncestorOrDescendantOfUser($individual, $target, "ancestors", $rule['ancestors'])
+				|| Individual::isAncestorOrDescendantOfUser($individual, $target, "descendants", $rule['descendants'])
+				|| Individual::isRelatedToIndividual($individual, $target, $rule['relpath'])
+				;
+
+			if ($access) break;
+		}
+
+		return $access;
+	}
+
 
 	/**
 	 * What is the specified/current user's access level within a tree?
@@ -121,14 +166,14 @@ class Auth {
 	 *
 	 * @return int
 	 */
-	public static function accessLevel(Tree $tree, User $user = null) {
+	public static function accessLevel(Tree $tree, User $user = null, Individual $individual = null) {
 		if ($user === null) {
 			$user = self::user();
 		}
 
 		if (self::isManager($tree, $user)) {
 			return self::PRIV_NONE;
-		} elseif (self::isMember($tree, $user)) {
+		} elseif (self::isMember($tree, $user) || (!empty($individual) && self::checkAccessRules("access", $tree, $individual, $user))) {
 			return self::PRIV_USER;
 		} else {
 			return self::PRIV_PRIVATE;

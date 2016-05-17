@@ -78,11 +78,34 @@ class Individual extends GedcomRecord {
 	 */
 	public function canShowName($access_level = null) {
 		if ($access_level === null) {
-			$access_level = Auth::accessLevel($this->tree);
+			$access_level = Auth::accessLevel($this->tree, null, $this);
 		}
 
 		return $this->tree->getPreference('SHOW_LIVING_NAMES') >= $access_level || $this->canShow($access_level);
 	}
+
+	/**
+	 * Can we edit this record?
+	 *
+	 * @return bool
+	 */
+	public function canShow($access_level = null) {
+		if ($access_level === null) {
+			$access_level = Auth::accessLevel($this->tree, null, $this);
+		}
+		return parent::canShow($access_level);
+	}
+
+
+	/**
+	 * Can we edit this record?
+	 *
+	 * @return bool
+	 */
+	public function canEdit() {
+		return Auth::isManager($this->tree) || Auth::isEditor($this->tree, null, $this) && strpos($this->gedcom, "\n1 RESN locked") === false;
+}
+
 
 	/**
 	 * Can this individual be shown?
@@ -124,6 +147,7 @@ class Individual extends GedcomRecord {
 			}
 		}
 		// Consider relationship privacy (unless an admin is applying download restrictions)
+/*
 		$user_path_length = $this->tree->getUserPreference(Auth::user(), 'RELATIONSHIP_PATH_LENGTH');
 		$user_ancestors_depth = $this->tree->getUserPreference(Auth::user(), 'RELATIONSHIP_ANCESTORS_DEPTH');
 		$user_descendants_depth = $this->tree->getUserPreference(Auth::user(), 'RELATIONSHIP_DESCENDANTS_DEPTH');
@@ -135,6 +159,8 @@ class Individual extends GedcomRecord {
 				self::isRelated($this, $user_path_length) ||
 				false
 				;
+*/
+		if ($this->tree->getTreeId() == $WT_TREE->getTreeId() && $access_level = Auth::accessLevel($this->tree, null, $this)) {
 		}
 
 		// No restriction found - show living people to members only:
@@ -217,7 +243,7 @@ class Individual extends GedcomRecord {
 	 *
 	 * @return bool
 	 */
-	private static function isAncestorOrDescendant(Individual $target, $AnDes, $depth=-1) {
+	public static function isAncestorOrDescendant(Individual $target, $AnDes, $depth=-1) {
 
 		if (!in_array($AnDes, array('descendants', 'ancestors'))) return false;
 
@@ -233,7 +259,27 @@ class Individual extends GedcomRecord {
 			return false;
 		}
 
+		return self::isAncestorOrDescendantOfUser($user_individual, $target, $AnDes, $depth);
+
+	}
+
+	public static function isAncestorOrDescendantOfUser(Individual $user_individual, Individual $target, $AnDes, $depth=-1) {
+
+
+		if (!$user_individual) {
+			// No individual linked to this account? Cannot use relationship privacy.
+			// We don't give permission to everyone, so return false here
+			return false;
+		}
+
+		if (!in_array($AnDes, array('descendants', 'ancestors'))) return false;
+
+		$linkTree = self::getLinkTree($target->tree->getTreeId());
+
+		if (!isset($linkTree[$AnDes])) return false;
+
 		return self::isIndividualInLinkTree($target->xref, $linkTree[$AnDes][$user_individual->xref], $depth);
+
 	}
 
 
@@ -273,9 +319,21 @@ class Individual extends GedcomRecord {
 	 * @return bool
 	 */
 	private static function isRelated(Individual $target, $distance) {
-		static $cache = null;
 
 		$user_individual = self::getInstance($target->tree->getUserPreference(Auth::user(), 'gedcomid'), $target->tree);
+
+		if ($user_individual) {
+			return self::isRelatedToIndividual($user_individual, $target, $distance);
+		} else {
+			// No individual linked to this account? Cannot use relationship privacy.
+			return true;
+		}
+
+	}
+
+	public static function isRelatedToIndividual(Individual $user_individual, Individual $target, $distance) {
+		static $cache = null;
+
 		if ($user_individual) {
 			if (!$cache) {
 				$cache = array(
