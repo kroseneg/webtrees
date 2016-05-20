@@ -144,7 +144,7 @@ class Auth {
 
 			$individual = Individual::getInstance($rule['gedcomid'], $tree);
 
-			$access |= false
+			$access = false
 				|| $individual == $target
 				|| Individual::isAncestorOrDescendantOfUser($individual, $target, "ancestors", $rule['ancestors'])
 				|| Individual::isAncestorOrDescendantOfUser($individual, $target, "descendants", $rule['descendants'])
