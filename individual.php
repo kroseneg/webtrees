@@ -204,7 +204,7 @@ if ($controller->record->canShow()) {
 	// Display name details
 	foreach ($controller->record->getFacts() as $fact) {
 		if ($fact->getTag() == 'NAME') {
-			$controller->printNameRecord($fact);
+			$controller->printNameRecord($fact, $fact->getParent()->getXref());
 		}
 	}
 

@@ -127,13 +127,13 @@ class IndividualController extends GedcomRecordController {
 	 *
 	 * @param Fact $event the event object
 	 */
-	public function printNameRecord(Fact $event) {
+	public function printNameRecord(Fact $event, $xref="xref") {
 		$factrec = $event->getGedcom();
 
 		// Create a dummy record, so we can extract the formatted NAME value from the event.
 		$dummy = new Individual(
-			'xref',
-			"0 @xref@ INDI\n1 DEAT Y\n" . $factrec,
+			$xref,
+			"0 @{$xref}@ INDI\n1 DEAT Y\n" . $factrec,
 			null,
 			$event->getParent()->getTree()
 		);
